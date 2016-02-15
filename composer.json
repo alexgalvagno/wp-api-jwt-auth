@@ -1,4 +1,5 @@
 {
+    "name": "alexgalvagno/wp-api-jwt-auth",
     "config": {
         "vendor-dir": "includes/vendor"
     },
