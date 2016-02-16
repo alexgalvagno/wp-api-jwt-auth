@@ -63,8 +63,8 @@ class Jwt_Auth_Public
     public function __construct($plugin_name, $version)
     {
         $this->plugin_name = $plugin_name;
-        $this->version = $version;
-        $this->namespace = $this->plugin_name.'/v'.intval($this->version);
+        // $this->version = $version;
+        $this->namespace = API_NAMESPACE . API_VERSION;
     }
 
     /**
@@ -72,12 +72,12 @@ class Jwt_Auth_Public
      */
     public function add_api_routes()
     {
-        register_rest_route($this->namespace, 'token', [
+        register_rest_route($this->namespace, 'jwt', [
             'methods' => 'POST',
             'callback' => array($this, 'generate_token'),
         ]);
 
-        register_rest_route($this->namespace, 'token/validate', array(
+        register_rest_route($this->namespace, 'jwt/validate', array(
             'methods' => 'POST',
             'callback' => array($this, 'validate_token'),
         ));
@@ -105,8 +105,9 @@ class Jwt_Auth_Public
     public function generate_token($request)
     {
         $secret_key = defined('JWT_AUTH_SECRET_KEY') ? JWT_AUTH_SECRET_KEY : false;
-        $username = $request->get_param('username');
-        $password = $request->get_param('password');
+        $username = isset($request->get_param('username')) ? $request->get_param('username') : null;
+        $password = isset($request->get_param('password')) ? $request->get_param('password') : null;
+        $fb_token = isset($request->get_param('fb_token')) ? $request->get_param('fb_token') : null;
 
         /** First thing, check the secret key if not exist return a error*/
         if (!$secret_key) {
@@ -118,11 +119,29 @@ class Jwt_Auth_Public
                 )
             );
         }
-        /** Try to authenticate the user with the passed credentials*/
-        $user = wp_authenticate($username, $password);
+
+        /** Try to authenticate the user with the passed facebook token */
+        if ( $fb_token ):
+            // User data from Facebook
+            $fb_check = wp_remote_get('https://graph.facebook.com/me?fields=id,email&access_token=' . $fb_token);
+
+            // check if the response is correct
+            if( !is_array($fb_check) ) {
+                $user = null;
+            }else {
+                $fb_user = json_decode($fb_check['body']);
+
+                if ( $fb_user && $fb_user->id && $fb_user->email ) {
+                    $user = get_user_by( 'email', $fb_user->email);
+                }else $user = null;
+            }
+        else :
+            /** Try to authenticate the user with the passed credentials*/
+            $user = wp_authenticate($username, $password);
+        endif;
 
         /** If the authentication fails return a error*/
-        if (is_wp_error($user)) {
+        if (is_wp_error($user) || $user == null) {
             return new WP_Error(
                 'jwt_auth_failed',
                 __('Invalid Credentials.', 'wp-api-jwt-auth'),
@@ -229,13 +248,14 @@ class Jwt_Auth_Public
          */
         list($token) = sscanf($auth, 'Bearer %s');
         if (!$token) {
-            return new WP_Error(
-                'jwt_auth_bad_auth_header',
-                __('Authorization header malformed.', 'wp-api-jwt-auth'),
-                array(
-                    'status' => 403,
-                )
-            );
+            return $user;
+            // return new WP_Error(
+            //     'jwt_auth_bad_auth_header',
+            //     __('Authorization header malformed.', 'wp-api-jwt-auth'),
+            //     array(
+            //         'status' => 403,
+            //     )
+            // );
         }
 
         /** Get the Secret Key */
